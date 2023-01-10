@@ -10,7 +10,7 @@ import hashlib
 import math
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePath
 import tqdm
 
 import musdb
@@ -202,12 +202,15 @@ def get_wav_datasets(args, name='wav'):
     return train_set, valid_set
 
 
-def _get_musdb_valid():
-    # Return musdb valid set.
-    import yaml
-    setup_path = Path(musdb.__path__[0]) / 'configs' / 'mus.yaml'
-    setup = yaml.safe_load(open(setup_path, 'r'))
-    return setup['validation_tracks']
+def _get_musdb_valid(args):
+    if args.name == "musdb":
+        # Return musdb valid set.
+        import yaml
+        setup_path = Path(musdb.__path__[0]) / 'configs' / 'mus.yaml'
+        setup = yaml.safe_load(open(setup_path, 'r'))
+        return setup['validation_tracks']
+    if args.name == "ke":
+        return os.listdir(args.musdb + '/valid')
 
 
 def get_musdb_wav_datasets(args):
@@ -223,7 +226,7 @@ def get_musdb_wav_datasets(args):
         distributed.barrier()
     metadata = json.load(open(metadata_file))
 
-    valid_tracks = _get_musdb_valid()
+    valid_tracks = _get_musdb_valid(args=args)
     if args.train_valid:
         metadata_train = metadata
     else:

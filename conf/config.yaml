@@ -8,6 +8,7 @@ defaults:
 
 dummy:
 dset:
+  name: musdb
   musdb: /checkpoint/defossez/datasets/musdbhq
   musdb_samplerate: 44100
   wav:  # path to custom wav dataset

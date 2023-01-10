@@ -30,3 +30,9 @@ clean:
 	rm -r dist build *.egg-info
 
 .PHONY: linter dist test_train test_eval
+
+#254b0174
+ori_ke:
+    export CUDA_VISIBLE_DEVICES=1
+    pkill -9 -f dora
+    dora run dset.musdb=/mnt/sda/shane/projects/my-demucs/ke_ori_dset/ batch_size=4 dset.name=ke test.every=100 epochs=1000 model=hdemucs max_batches=10000

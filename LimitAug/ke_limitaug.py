@@ -2,6 +2,7 @@ import os
 from glob import glob
 import random
 import math
+import uuid
 from typing import Optional, Callable
 
 import numpy as np
@@ -205,7 +206,8 @@ class musdb_train_Dataset(Dataset):
 
         self.root = root
         self.sources = ["vocals", "bass", "drums", "other"]
-        self.train_list = glob(f"{self.root}/train/*")
+        # self.train_list = glob(f"{self.root}/train/*")
+        self.train_list = glob(f"{self.root}/*/*")
         self.valid_list = [
             "ANiMAL - Rockshow",
             "Actions - One Minute Smile",
@@ -360,6 +362,37 @@ class musdb_train_Dataset(Dataset):
             target *= mixture / (mixture_orig + 1e-8)
         return mixture, target
 
+    def get_my_limitaug_results(self, mixture, vocals, bass, drums, other):
+        if False:
+            raise NotImplementedError
+
+        # Apply LimitAug then loudness normalization (Method (4))
+        elif self.limitaug_method == "limitaug_then_loudnorm":
+            self.board[1].release_ms = random.uniform(30.0, 200.0)
+            mixture_orig = mixture.copy()
+            if (
+                self.limitaug_mode == "uniform"
+            ):  # if limitaug_mode is uniform, then choose target_lufs from uniform distribution
+                target_lufs = random.uniform(-20, -5)
+            else:  # else, choose target_lufs from gaussian distribution
+                target_lufs = random.gauss(
+                    self.limitaug_mode_statistics[self.limitaug_mode][0],
+                    self.limitaug_mode_statistics[self.limitaug_mode][1],
+                )
+            mixture = apply_limitaug_loudnorm(
+                mixture,
+                self.board,
+                self.meter,
+                self.sample_rate,
+                target_lufs=target_lufs,
+                target_loudnorm_lufs=self.target_loudnorm_lufs,
+            )
+            bass *= mixture / (mixture_orig + 1e-8)
+            drums *= mixture / (mixture_orig + 1e-8)
+            vocals *= mixture / (mixture_orig + 1e-8)
+            other *= mixture / (mixture_orig + 1e-8)
+        return mixture, vocals, bass, drums, other
+
     def __getitem__(self, index):
         audio_sources = []
         target_ind = None
@@ -388,15 +421,26 @@ class musdb_train_Dataset(Dataset):
         # # apply linear mix over source index=0
         x = stems.sum(0)
         # get the target stem
-        y = stems[target_ind]
+        # y = stems[target_ind]
 
         # Apply the limitaug,
-        x, y = self.get_limitaug_results(x, y)
+        # x, y = self.get_limitaug_results(x, y)
 
-        x = torch.as_tensor(x, dtype=torch.float32)
-        y = torch.as_tensor(y, dtype=torch.float32)
-
-        return x, y
+        mixture, vocals, bass, drums, other = self.get_my_limitaug_results(
+            mixture=x,
+            vocals=stems[0],
+            bass=stems[1],
+            drums=stems[2],
+            other=stems[3]
+        )
+        # x = torch.as_tensor(x, dtype=torch.float32)
+        # y = torch.as_tensor(y, dtype=torch.float32)
+        mixture = torch.as_tensor(mixture, dtype=torch.float32)
+        vocals = torch.as_tensor(vocals, dtype=torch.float32)
+        bass = torch.as_tensor(bass, dtype=torch.float32)
+        drums = torch.as_tensor(drums, dtype=torch.float32)
+        other = torch.as_tensor(other, dtype=torch.float32)
+        return mixture, vocals, bass, drums, other
 
     def __len__(self):
         return len(self.train_list) * self.samples_per_track
@@ -456,13 +500,16 @@ if __name__ == "__main__":
 
     source_augmentations_ = aug_from_str(["gain", "channelswap"])
 
-    args.musdb_root = r'D:\musdb'
+    args.musdb_root = r'/mnt/datasets/singing_voice_separation_data/Ke_wav/'
     args.limitaug_method = 'limitaug_then_loudnorm'
+    seq_duration = 30
+    output_path = r'/mnt/datasets/singing_voice_separation_data/Ke_aug_wav'
+
 
     train_dataset = musdb_train_Dataset(
         target="vocals",
         root=args.musdb_root,
-        seq_duration=6.0,
+        seq_duration=seq_duration,
         source_augmentations=source_augmentations_,
         limitaug_method=args.limitaug_method,
         limitaug_mode=args.limitaug_mode,
@@ -481,14 +528,34 @@ if __name__ == "__main__":
 
     import soundfile as sf
 
-    meter = pyln.Meter(44100)
-    for i in range(5):
-        for x, y in dataloader:
-            mixture_loudness = meter.integrated_loudness(x[0].numpy().T)
-            target_loudness = meter.integrated_loudness(y[0].numpy().T)
-            print(f"mixture loudness : {mixture_loudness} LUFS")
-            print(f"target loudness : {target_loudness} LUFS")
-            sf.write('mixture.wav', x[0].T, 44100)
-            sf.write('target.wav', y[0].T, 44100)
-            break
-        break
+    def main():
+        meter = pyln.Meter(44100)
+        cnt = 0
+        for i in range(5):
+            for mixture, vocals, bass, drums, other in dataloader:
+                mixture_loudness = meter.integrated_loudness(mixture[0].numpy().T)
+                vocals_loudness = meter.integrated_loudness(vocals[0].numpy().T)
+                bass_loudness = meter.integrated_loudness(bass[0].numpy().T)
+                drums_loudness = meter.integrated_loudness(drums[0].numpy().T)
+                other_loudness = meter.integrated_loudness(other[0].numpy().T)
+                print(f"mixture loudness : {mixture_loudness} LUFS")
+                print(f"vocals loudness : {vocals_loudness} LUFS")
+                print(f"bass loudness : {bass_loudness} LUFS")
+                print(f"drums loudness : {drums_loudness} LUFS")
+                print(f"other loudness : {other_loudness} LUFS")
+                print('-' * 100)
+                if vocals_loudness == -np.inf or mixture_loudness == -np.inf or \
+                        bass_loudness == -np.inf or drums_loudness == -np.inf or other_loudness == -np.inf:
+                    continue
+                else:
+                    output_path_ = f"{output_path}/{uuid.uuid4().hex}"
+                    sf.write(f'{output_path_}/mixture.wav', mixture[0].T, 44100)
+                    sf.write(f'{output_path_}/vocals.wav', vocals[0].T, 44100)
+                    sf.write(f'{output_path_}/bass.wav', bass[0].T, 44100)
+                    sf.write(f'{output_path_}/drums.wav', drums[0].T, 44100)
+                    sf.write(f'{output_path_}/other.wav', other[0].T, 44100)
+                    cnt += 1
+                    if cnt == 10000:
+                        return True
+            # break
+        # break
